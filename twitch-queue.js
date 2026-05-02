@@ -32,14 +32,42 @@ async function getTwitchAccessToken() {
     };
 }
 
+async function getUserInfo(accessToken) {
+    console.log("Fetching user info...");
+    const userinfoRes = await fetch('https://id.twitch.tv/oauth2/userinfo', {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,  // accessToken is already a string
+        }
+    });
+    const userinfoData = await userinfoRes.json();
+    // Don't log PII in production
+    if (process.env.NODE_ENV !== 'production') {
+        console.log(userinfoData);
+    }
+    return userinfoData;
+}
+
 // Initialize PostgreSQL connection
-const sql = postgres('postgres://nesi:${postgresPassword}@127.0.0.1:5432/twitchapidb',{
+const sql = postgres(`postgres://nesi:${postgresPassword}@127.0.0.1:5432/twitchapidb`,{
     host                 : '127.0.0.1',            // Postgres ip address[s] or domain name[s]
     port                 : 5432,          // Postgres server port[s]
     database             : 'twitchapidb',            // Name of database to connect to
     username             : 'nesi',            // Username of database user
     password             : `${postgresPassword}`,            // Password of database user
 });
+
+async function saveUserToken(userId, username, accessToken, refreshToken) {
+    await sql`
+        INSERT INTO users (uid, username, access_token, refresh_token)
+        VALUES (${userId}, ${username}, ${accessToken}, ${refreshToken})
+        ON CONFLICT (uid) DO UPDATE
+        SET access_token = ${accessToken},
+            refresh_token = ${refreshToken},
+            updated_at = NOW()
+    `;
+}
+
 
 app.use((req, res, next) => {
   // cors
@@ -53,16 +81,44 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get("/api/twitch-queue", async (req, res) => {
+app.get("/api/twitch-queue/auth", async (req, res) => {
+    req.query.code = null;
+    const redirectUri = "http://localhost:8080/api/twitch-queue/oauth/authorize";
+    const scopes = "user:read:email";
+    const authUrl = `https://id.twitch.tv/oauth2/authorize?client_id=${twitchClientId}&force_verify=true&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scopes)}`;
+    res.redirect(authUrl);
+});
+
+app.get("/api/twitch-queue/oauth/authorize", async (req, res) => {
+    const code = req.query.code;
+
+    if (!code || typeof code !== 'string' || code.length > 512) {
+        return res.status(400).json({ error: 'Invalid authorization code' });
+    }
+
     try {
-        const token = await getTwitchAccessToken();
-        res.json(token);
+        const tokenResponse = await fetch(`https://id.twitch.tv/oauth2/token`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `client_id=${twitchClientId}&client_secret=${twitchClientSecret}&code=${code}&grant_type=authorization_code&redirect_uri=http://localhost:8080/api/twitch-queue/oauth/authorize`
+        });
+        const tokenData = await tokenResponse.json();
+
+        const userInfo = await getUserInfo(tokenData.access_token);
+        await saveUserToken(userInfo.sub, userInfo.preferred_username, tokenData.access_token, tokenData.refresh_token);
+
+        res.redirect(`https://card.nesiexe.xyz/`);
     } catch (err) {
-        console.error('Error getting Twitch access token:', err);
-        res.status(500).json({ error: 'Failed to get Twitch access token' });
+        console.error('Error exchanging authorization code for access token:', err);
+        res.status(500).json({ error: 'Failed to exchange authorization code for access token' });
     }
 });
 
+
+
 app.listen(8080, '127.0.0.1', () => {
     console.log("Server is running on http://localhost:8080");
+    console.log("to auth go to http://localhost:8080/api/twitch-queue/auth");
 });

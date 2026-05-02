@@ -64,10 +64,10 @@ async function saveUserToken(userId, username, accessToken, refreshToken) {
         ON CONFLICT (uid) DO UPDATE
         SET access_token = ${accessToken},
             refresh_token = ${refreshToken},
-            updated_at = NOW()
+            updated_at = NOW(),
+            timesaccessed = users.timesaccessed + 1
     `;
 }
-
 
 app.use((req, res, next) => {
   // cors
@@ -87,6 +87,59 @@ app.get("/api/twitch-queue/auth", async (req, res) => {
     const scopes = "user:read:email";
     const authUrl = `https://id.twitch.tv/oauth2/authorize?client_id=${twitchClientId}&force_verify=true&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scopes)}`;
     res.redirect(authUrl);
+});
+
+// Endpoint to toggle user ban status
+app.post("/api/user/:username/ban", async (req, res) => {
+    const { username } = req.params;
+    try {
+        const rows = await sql`
+            UPDATE users
+            SET isbanned = NOT isbanned
+            WHERE username = ${username}
+            RETURNING uid, username, isbanned
+        `;
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json(rows[0]);
+    } catch (err) {
+        console.error('DB error:', err);
+        res.status(500).json({ error: 'Database error' });
+    }
+});
+
+// Endpoint to get user data by username
+app.get("/api/user/:username", async (req, res) => {
+    const { username } = req.params;
+    try {
+        const rows = await sql`
+            SELECT uid, username, display_name, timesaccessed, isbanned
+            FROM users
+            WHERE username = ${username}
+        `;
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json(rows[0]);
+    } catch (err) {
+        console.error('DB error:', err);
+        res.status(500).json({ error: 'Database error' });
+    }
+});
+
+app.get("/api/users", async (req, res) => {
+    try {
+        const rows = await sql`
+            SELECT uid, username, display_name, email, timesaccessed, isbanned, created_at
+            FROM users
+            ORDER BY created_at DESC
+        `;
+        res.json(rows);
+    } catch (err) {
+        console.error('DB error:', err);
+        res.status(500).json({ error: 'Database error' });
+    }
 });
 
 app.get("/api/twitch-queue/oauth/authorize", async (req, res) => {

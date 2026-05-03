@@ -11,11 +11,11 @@ if (!envPath) {
   throw new Error('ENV_CODE is not set');
 }
 dotenv.config({ path: envPath });
-const pApp = express();             // Public-facing server for Twitch OAuth and frontend
+const pubApp = express();             // Public-facing server for Twitch OAuth and frontend
 const intApp = express();           // Internal server for admin panel API, not exposed to the public       //!DON'T EXPOSE PORT 8081 TO THE PUBLIC
 
 intApp.set("trust proxy", true);
-pApp.set("trust proxy", true);
+pubApp.set("trust proxy", true);
 
 const twitchClientId = process.env.TWITCH_CLIENT_ID;
 const twitchClientSecret = process.env.TWITCH_CLIENT_SECRET;
@@ -80,7 +80,7 @@ async function saveUserToken(userId, username, accessToken, refreshToken) {
 }
 
 // CORS middleware for both servers
-pApp.use((req, res, next) => {
+pubApp.use((req, res, next) => {
   // cors
   res.set("Access-Control-Allow-Origin", "*");
   res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -106,7 +106,7 @@ intApp.use((req, res, next) => {
 
 
 //configure routes
-pApp.get("/api/twitch-queue/auth", async (req, res) => {
+pubApp.get("/api/twitch-queue/auth", async (req, res) => {
     req.query.code = null;
     const redirectUri = `http://localhost:${PublicFacingPort}/api/twitch-queue/oauth/authorize`;
     const scopes = "user:read:email";
@@ -114,7 +114,7 @@ pApp.get("/api/twitch-queue/auth", async (req, res) => {
     res.redirect(authUrl);
 });
 
-pApp.get("/api/twitch-queue/oauth/authorize", async (req, res) => {
+pubApp.get("/api/twitch-queue/oauth/authorize", async (req, res) => {
     const code = req.query.code;
 
     if (!code || typeof code !== 'string' || code.length > 512) {
@@ -194,7 +194,7 @@ intApp.get("/api/users", async (req, res) => {
     }
 });
 
-pApp.listen(PublicFacingPort, '127.0.0.1', () => {
+pubApp.listen(PublicFacingPort, '127.0.0.1', () => {
     console.log(`Front Server is running on http://localhost:${PublicFacingPort}`);
     console.log(`to auth go to http://localhost:${PublicFacingPort}/api/twitch-queue/auth`);
 });

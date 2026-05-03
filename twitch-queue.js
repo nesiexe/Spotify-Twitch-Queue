@@ -2,22 +2,28 @@ import express from "express";
 import dotenv from "dotenv";
 import postgres from "postgres";
 
+//? Remember to set allowed redirect URIs in Twitch Dev Console to http://localhost:{PublicFacingPort}/api/twitch-queue/oauth/authorize
+const PublicFacingPort = 8080;
+const InternalPort = 8081;
+
 const envPath = process.env.ENV_CODE;
 if (!envPath) {
   throw new Error('ENV_CODE is not set');
 }
 dotenv.config({ path: envPath });
-const app = express();
-const intapp = express();
+const pApp = express();             // Public-facing server for Twitch OAuth and frontend
+const intApp = express();           // Internal server for admin panel API, not exposed to the public       //!DON'T EXPOSE PORT 8081 TO THE PUBLIC
 
-intapp.set("trust proxy", true);
-app.set("trust proxy", true);
+intApp.set("trust proxy", true);
+pApp.set("trust proxy", true);
 
 const twitchClientId = process.env.TWITCH_CLIENT_ID;
 const twitchClientSecret = process.env.TWITCH_CLIENT_SECRET;
+const postgresUser = process.env.POSTGRES_USER;
 const postgresPassword = process.env.POSTGRES_PASSWORD;
+const postgresDB = process.env.POSTGRES_DB;
 
-// Function to get Twitch access token
+// Function to get Twitch access token          //! unused for now
 async function getTwitchAccessToken() {
     const res = await fetch(`https://id.twitch.tv/oauth2/token`, {
         method: 'POST',
@@ -52,11 +58,11 @@ async function getUserInfo(accessToken) {
 }
 
 // Initialize PostgreSQL connection
-const sql = postgres(`postgres://nesi:${postgresPassword}@127.0.0.1:5432/twitchapidb`,{
+const sql = postgres(`postgres://${postgresUser}:${postgresPassword}@127.0.0.1:5432/${postgresDB}`,{
     host                 : '127.0.0.1',            // Postgres ip address[s] or domain name[s]
     port                 : 5432,          // Postgres server port[s]
-    database             : 'twitchapidb',            // Name of database to connect to
-    username             : 'nesi',            // Username of database user
+    database             : `${postgresDB}`,            // Name of database to connect to
+    username             : `${postgresUser}`,            // Username of database user
     password             : `${postgresPassword}`,            // Password of database user
 });
 
@@ -73,7 +79,8 @@ async function saveUserToken(userId, username, accessToken, refreshToken) {
     `;
 }
 
-app.use((req, res, next) => {
+// CORS middleware for both servers
+pApp.use((req, res, next) => {
   // cors
   res.set("Access-Control-Allow-Origin", "*");
   res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -85,15 +92,29 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get("/api/twitch-queue/auth", async (req, res) => {
+intApp.use((req, res, next) => {
+    // cors
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type");
+
+    if (req.method === "OPTIONS") {
+        return res.sendStatus(204);
+    }
+    next();
+});
+
+
+//configure routes
+pApp.get("/api/twitch-queue/auth", async (req, res) => {
     req.query.code = null;
-    const redirectUri = "http://localhost:8080/api/twitch-queue/oauth/authorize";
+    const redirectUri = `http://localhost:${PublicFacingPort}/api/twitch-queue/oauth/authorize`;
     const scopes = "user:read:email";
     const authUrl = `https://id.twitch.tv/oauth2/authorize?client_id=${twitchClientId}&force_verify=true&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scopes)}`;
     res.redirect(authUrl);
 });
 
-app.get("/api/twitch-queue/oauth/authorize", async (req, res) => {
+pApp.get("/api/twitch-queue/oauth/authorize", async (req, res) => {
     const code = req.query.code;
 
     if (!code || typeof code !== 'string' || code.length > 512) {
@@ -106,39 +127,22 @@ app.get("/api/twitch-queue/oauth/authorize", async (req, res) => {
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
-            body: `client_id=${twitchClientId}&client_secret=${twitchClientSecret}&code=${code}&grant_type=authorization_code&redirect_uri=http://localhost:8080/api/twitch-queue/oauth/authorize`
+            body: `client_id=${twitchClientId}&client_secret=${twitchClientSecret}&code=${code}&grant_type=authorization_code&redirect_uri=http://localhost:${PublicFacingPort}/api/twitch-queue/oauth/authorize`
         });
         const tokenData = await tokenResponse.json();
 
         const userInfo = await getUserInfo(tokenData.access_token);
         await saveUserToken(userInfo.sub, userInfo.preferred_username, tokenData.access_token, tokenData.refresh_token);
 
-        res.redirect(`https://card.nesiexe.xyz/`);
+        res.redirect(`https://card.nesiexe.xyz/`);  //? change this to something else in the future
     } catch (err) {
         console.error('Error exchanging authorization code for access token:', err);
         res.status(500).json({ error: 'Failed to exchange authorization code for access token' });
     }
 });
 
-app.listen(8080, '127.0.0.1', () => {
-    console.log("Front Server is running on http://localhost:8080");
-    console.log("to auth go to http://localhost:8080/api/twitch-queue/auth");
-});
-
-intapp.use((req, res, next) => {
-    // cors
-    res.set("Access-Control-Allow-Origin", "*");
-    res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.set("Access-Control-Allow-Headers", "Content-Type");
-
-    if (req.method === "OPTIONS") {
-        return res.sendStatus(204);
-    }
-    next();
-});
-
 // Endpoint to toggle user ban status
-intapp.post("/api/user/:username/ban", async (req, res) => {
+intApp.post("/api/user/:username/ban", async (req, res) => {
     const { username } = req.params;
     try {
         const rows = await sql`
@@ -158,7 +162,7 @@ intapp.post("/api/user/:username/ban", async (req, res) => {
 });
 
 // Endpoint to get user data by username
-intapp.get("/api/user/:username", async (req, res) => {
+intApp.get("/api/user/:username", async (req, res) => {
     const { username } = req.params;
     try {
         const rows = await sql`
@@ -176,7 +180,7 @@ intapp.get("/api/user/:username", async (req, res) => {
     }
 });
 
-intapp.get("/api/users", async (req, res) => {
+intApp.get("/api/users", async (req, res) => {
     try {
         const rows = await sql`
             SELECT uid, username, display_name, email, timesaccessed, isbanned, created_at
@@ -190,6 +194,11 @@ intapp.get("/api/users", async (req, res) => {
     }
 });
 
-intapp.listen(8081, '127.0.0.1', () => {
-    console.log("Server app is running on http://localhost:8081");
+pApp.listen(PublicFacingPort, '127.0.0.1', () => {
+    console.log(`Front Server is running on http://localhost:${PublicFacingPort}`);
+    console.log(`to auth go to http://localhost:${PublicFacingPort}/api/twitch-queue/auth`);
+});
+
+intApp.listen(InternalPort, '127.0.0.1', () => {
+    console.log(`Internal Server is running on http://localhost:${InternalPort}`);
 });

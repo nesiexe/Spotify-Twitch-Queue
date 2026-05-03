@@ -8,7 +8,9 @@ if (!envPath) {
 }
 dotenv.config({ path: envPath });
 const app = express();
+const intapp = express();
 
+intapp.set("trust proxy", true);
 app.set("trust proxy", true);
 
 const twitchClientId = process.env.TWITCH_CLIENT_ID;
@@ -32,12 +34,13 @@ async function getTwitchAccessToken() {
     };
 }
 
+// get user data from twitch
 async function getUserInfo(accessToken) {
     console.log("Fetching user info...");
     const userinfoRes = await fetch('https://id.twitch.tv/oauth2/userinfo', {
         method: 'GET',
         headers: {
-            'Authorization': `Bearer ${accessToken}`,  // accessToken is already a string
+            'Authorization': `Bearer ${accessToken}`, 
         }
     });
     const userinfoData = await userinfoRes.json();
@@ -57,6 +60,7 @@ const sql = postgres(`postgres://nesi:${postgresPassword}@127.0.0.1:5432/twitcha
     password             : `${postgresPassword}`,            // Password of database user
 });
 
+// save data to db 
 async function saveUserToken(userId, username, accessToken, refreshToken) {
     await sql`
         INSERT INTO users (uid, username, access_token, refresh_token)
@@ -89,59 +93,6 @@ app.get("/api/twitch-queue/auth", async (req, res) => {
     res.redirect(authUrl);
 });
 
-// Endpoint to toggle user ban status
-app.post("/api/user/:username/ban", async (req, res) => {
-    const { username } = req.params;
-    try {
-        const rows = await sql`
-            UPDATE users
-            SET isbanned = NOT isbanned
-            WHERE username = ${username}
-            RETURNING uid, username, isbanned
-        `;
-        if (rows.length === 0) {
-            return res.status(404).json({ error: 'User not found' });
-        }
-        res.json(rows[0]);
-    } catch (err) {
-        console.error('DB error:', err);
-        res.status(500).json({ error: 'Database error' });
-    }
-});
-
-// Endpoint to get user data by username
-app.get("/api/user/:username", async (req, res) => {
-    const { username } = req.params;
-    try {
-        const rows = await sql`
-            SELECT uid, username, display_name, timesaccessed, isbanned
-            FROM users
-            WHERE username = ${username}
-        `;
-        if (rows.length === 0) {
-            return res.status(404).json({ error: 'User not found' });
-        }
-        res.json(rows[0]);
-    } catch (err) {
-        console.error('DB error:', err);
-        res.status(500).json({ error: 'Database error' });
-    }
-});
-
-app.get("/api/users", async (req, res) => {
-    try {
-        const rows = await sql`
-            SELECT uid, username, display_name, email, timesaccessed, isbanned, created_at
-            FROM users
-            ORDER BY created_at DESC
-        `;
-        res.json(rows);
-    } catch (err) {
-        console.error('DB error:', err);
-        res.status(500).json({ error: 'Database error' });
-    }
-});
-
 app.get("/api/twitch-queue/oauth/authorize", async (req, res) => {
     const code = req.query.code;
 
@@ -169,9 +120,76 @@ app.get("/api/twitch-queue/oauth/authorize", async (req, res) => {
     }
 });
 
-
-
 app.listen(8080, '127.0.0.1', () => {
-    console.log("Server is running on http://localhost:8080");
+    console.log("Front Server is running on http://localhost:8080");
     console.log("to auth go to http://localhost:8080/api/twitch-queue/auth");
+});
+
+intapp.use((req, res, next) => {
+    // cors
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type");
+
+    if (req.method === "OPTIONS") {
+        return res.sendStatus(204);
+    }
+    next();
+});
+
+// Endpoint to toggle user ban status
+intapp.post("/api/user/:username/ban", async (req, res) => {
+    const { username } = req.params;
+    try {
+        const rows = await sql`
+            UPDATE users
+            SET isbanned = NOT isbanned
+            WHERE username = ${username}
+            RETURNING uid, username, isbanned
+        `;
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json(rows[0]);
+    } catch (err) {
+        console.error('DB error:', err);
+        res.status(500).json({ error: 'Database error' });
+    }
+});
+
+// Endpoint to get user data by username
+intapp.get("/api/user/:username", async (req, res) => {
+    const { username } = req.params;
+    try {
+        const rows = await sql`
+            SELECT uid, username, display_name, timesaccessed, isbanned
+            FROM users
+            WHERE username = ${username}
+        `;
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json(rows[0]);
+    } catch (err) {
+        console.error('DB error:', err);
+        res.status(500).json({ error: 'Database error' });
+    }
+});
+
+intapp.get("/api/users", async (req, res) => {
+    try {
+        const rows = await sql`
+            SELECT uid, username, display_name, email, timesaccessed, isbanned, created_at
+            FROM users
+            ORDER BY created_at DESC
+        `;
+        res.json(rows);
+    } catch (err) {
+        console.error('DB error:', err);
+        res.status(500).json({ error: 'Database error' });
+    }
+});
+
+intapp.listen(8081, '127.0.0.1', () => {
+    console.log("Server app is running on http://localhost:8081");
 });

@@ -25,29 +25,6 @@ const postgresUser = process.env.POSTGRES_USER;
 const postgresPassword = process.env.POSTGRES_PASSWORD;
 const postgresDB = process.env.POSTGRES_DB;
 
-// Function to get Twitch access token          //! unused for now
-async function getTwitchAccessToken() {pubApp.get("/api/twitch-queue/auth", async (req, res) => {
-    req.query.code = null;
-    const redirectUri = `http://localhost:${PublicFacingPort}/api/twitch-queue/oauth/authorize`;
-    const scopes = "user:read:email";
-    const authUrl = `https://id.twitch.tv/oauth2/authorize?client_id=${twitchClientId}&force_verify=true&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scopes)}`;
-    res.redirect(authUrl);
-});
-    const res = await fetch(`https://id.twitch.tv/oauth2/token`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: `client_id=${twitchClientId}&client_secret=${twitchClientSecret}&grant_type=client_credentials`
-    });
-    const data = await res.json();
-    return{ 
-        access_token: data.access_token ,
-        expires_in: data.expires_in,
-        token_type: data.token_type
-    };
-}
-
 // get user data from twitch
 async function getUserInfo(accessToken) {
     console.log("Fetching user info...");
@@ -242,3 +219,20 @@ pubApp.listen(PublicFacingPort, '127.0.0.1', () => {
 intApp.listen(InternalPort, '127.0.0.1', () => {
     console.log(`Internal Server is running on http://localhost:${InternalPort}`);
 });
+
+
+/*
+Made by a human (Nesi) with love on Earth.
+╔══════════════════════════════╗
+║ Nesi.EXE               _ □ x ║
+╟──────────────────────────────╢
+║  __   __ ______ ______ __    ║
+║ /\ "-.\ \\  ___\\  ___\\ \   ║
+║ \ \ \-.  \\  __\ \___  \\ \  ║
+║  \ \_\\"\_\\_____\\_____\\_\ ║
+║   \/_/ \/_//_____//_____//_/ ║
+║                              ║
+╚══════════════════════════════╝
+
+:3 powered
+*/
